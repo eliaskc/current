@@ -1,0 +1,24 @@
+## Xcode
+build/
+DerivedData/
+*.xcodeproj/*
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/xcshareddata/
+!*.xcodeproj/project.xcworkspace/
+*.xcworkspace/*
+!*.xcworkspace/contents.xcworkspacedata
+!*.xcworkspace/xcshareddata/
+xcuserdata/
+*.xcuserstate
+
+## Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+Package.resolved
+
+## macOS
+.DS_Store
+
+## Project — xcodegen regenerates this
+Current.xcodeproj/

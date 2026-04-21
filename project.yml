@@ -1,0 +1,39 @@
+name: Current
+options:
+  bundleIdPrefix: com.elias
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_HARDENED_RUNTIME: YES
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "-"
+
+targets:
+  Current:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/Current
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleName: Current
+        CFBundleDisplayName: Current
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSUIElement: true
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        NSHumanReadableCopyright: ""
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.elias.current
+        PRODUCT_NAME: Current
+        COMBINE_HIDPI_IMAGES: YES
+        ENABLE_APP_SANDBOX: NO
