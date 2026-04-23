@@ -21,17 +21,24 @@ struct Header: View {
                     .help("Last checked")
             }
 
-            if manager.isRefreshing {
-                ProgressView().controlSize(.small)
-            } else {
-                Button {
-                    Task { await manager.refresh() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
+            // Fixed-size slot so swapping button ↔ spinner doesn't shift the header.
+            ZStack {
+                if manager.isRefreshing {
+                    ProgressView()
+                        .controlSize(.small)
+                        .scaleEffect(0.8)
+                } else {
+                    Button {
+                        Task { await manager.refresh() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .hoverHighlight()
+                    .help("Check now")
                 }
-                .buttonStyle(.borderless)
-                .help("Check now")
             }
+            .frame(width: 18, height: 18)
 
             Button {
                 NotificationCenter.default.post(name: .currentOpenPreferences, object: nil)
@@ -39,6 +46,7 @@ struct Header: View {
                 Image(systemName: "gearshape")
             }
             .buttonStyle(.borderless)
+            .hoverHighlight()
             .help("Preferences")
         }
         .padding(.horizontal, 12)

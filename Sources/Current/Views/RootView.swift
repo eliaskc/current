@@ -14,19 +14,43 @@ struct RootView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(manager.visibleItems) { item in
+                        let items = manager.visibleItems
+                        ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
                             UpdateRow(item: item)
-                            Divider().opacity(0.4)
+                            if idx < items.count - 1 {
+                                Divider().opacity(0.4)
+                            }
                         }
                     }
+                    .background(OverlayScrollerStyle())
                 }
+                .scrollIndicators(.automatic)
             }
 
             Divider()
             Footer()
         }
-        .frame(width: 340, height: 480)
+        .frame(width: 400, height: 420)
     }
+}
+
+/// Force the enclosing `NSScrollView` into the thin, auto-hiding overlay
+/// scroller style even when the user has "Always show scroll bars" set in
+/// System Settings. Without this we get the chunky legacy scroller that
+/// eats a full gutter on the right edge of the popover.
+private struct OverlayScrollerStyle: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let v = NSView(frame: .zero)
+        DispatchQueue.main.async { [weak v] in
+            guard let scroll = v?.enclosingScrollView else { return }
+            scroll.scrollerStyle = .overlay
+            scroll.autohidesScrollers = true
+            scroll.scrollerInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+            scroll.verticalScroller?.knobStyle = .default
+        }
+        return v
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
 private struct EmptyState: View {

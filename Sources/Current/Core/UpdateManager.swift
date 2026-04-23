@@ -46,6 +46,13 @@ final class UpdateManager: ObservableObject {
              .sorted { ($0.sourceId, $0.name) < ($1.sourceId, $1.name) }
     }
     var visibleCount: Int { visibleItems.count }
+
+    /// Visible items that still need to be upgraded — excludes anything in
+    /// `.success`. Drives the "Update All" button's count and disabled state
+    /// so we don't pretend there's work left when everything's green.
+    var pendingItems: [UpdateItem] {
+        visibleItems.filter { status[$0.id] != .success }
+    }
     var isWorking: Bool { isRefreshing || isBatchRunning }
 
     func isSkipped(_ item: UpdateItem) -> Bool {
@@ -140,7 +147,21 @@ final class UpdateManager: ObservableObject {
     }
 
     func upgradeAll() async {
-        await upgrade(items: visibleItems)
+        await upgrade(items: pendingItems)
+    }
+
+    /// Drop everything currently sitting in `.success`. Called when the
+    /// popover closes so a fresh open doesn't show stale "done" rows.
+    func clearCompleted() {
+        let doneIds = status.compactMap { $0.value == .success ? $0.key : nil }
+        guard !doneIds.isEmpty else { return }
+        let done = Set(doneIds)
+        items.removeAll { done.contains($0.id) }
+        for id in doneIds {
+            status.removeValue(forKey: id)
+            logs.removeValue(forKey: id)
+        }
+        notifyMenuBar()
     }
 
     func upgrade(items targets: [UpdateItem]) async {
@@ -182,14 +203,9 @@ final class UpdateManager: ObservableObject {
             }
             status[id] = .success
             recordUpgrade(item, success: true)
-
-            // Linger for ~1.2s so the ✓ is visible, then clear the row.
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(1.2))
-                self?.items.removeAll { $0.id == id }
-                self?.status.removeValue(forKey: id)
-                self?.notifyMenuBar()
-            }
+            // Keep the row in place as a "done" state. It disappears on the
+            // next refresh when the source stops reporting it as outdated.
+            notifyMenuBar()
         } catch {
             status[id] = .failure(error.localizedDescription)
             recordUpgrade(item, success: false)

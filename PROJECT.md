@@ -15,8 +15,8 @@ questions. Keep short.
       tracked (`available` / `disabled` / `unavailable`).
 - [x] Upgrade flow: sequential batch. Row states:
       `idle → queued → running → success / failure`.
-- [x] Inline per-row log (expand/collapse via chevron, or Log button
-      while running/failed).
+- [x] Inline per-row log (chevron next to name, or tap the row to
+      expand). No separate Log/Hide button — the chevron is enough.
 - [x] Skip version (auto-unskipped when a newer version ships).
 - [x] Ignore package (persists until removed from Preferences).
 - [x] Stats: append-only upgrade log, summary of "this week" / "all
@@ -32,6 +32,28 @@ questions. Keep short.
       default-action keyboard shortcut, count in label.
 - [x] Stable relative timestamp in header (`just now`, `5 min ago`,
       `2 hours ago`) that doesn't tick.
+- [x] Background refresh actually ticks. `Timer` on `RunLoop.main` in
+      `.common` mode wakes every 60s to call `refreshIfStale()`, plus
+      an `NSWorkspace.didWakeNotification` observer re-checks after
+      sleep. Previously the app only refreshed on launch / popover
+      open, so an unattended menu bar would sit on "23 hours ago".
+- [x] Overlay-style scrollbar in the popover regardless of the user's
+      "Show scroll bars" system preference — a tiny `NSViewRepresentable`
+      reaches through `enclosingScrollView` and forces
+      `scrollerStyle = .overlay`.
+- [x] Hover affordances across the chrome: `.hoverHighlight()` view
+      modifier for borderless icons (refresh, gear, bell), and a
+      `ChipButtonStyle` for row Skip/Update with clear idle / hover /
+      press fills.
+- [x] Scoped npm names render with the `@scope/` prefix on its own
+      muted line above the bold bare name, so
+      `@mariozechner/pi-coding-agent` stops getting truncated to
+      `pi-…agent`. Full identifier still surfaces on hover.
+- [x] `Update All` button is hidden (not disabled) once every visible
+      row is in `.success`. Avoids a ghost CTA inviting a re-run.
+- [x] Completed rows clear on popover close via `NSPopoverDelegate`
+      `popoverDidClose` → `manager.clearCompleted()`. Next open is
+      fresh.
 
 ## Architecture snapshot
 
@@ -39,7 +61,8 @@ questions. Keep short.
 Sources/Current/
 ├── App.swift                       # @main + NSApplicationDelegateAdaptor
 ├── Core/
-│   ├── AppDelegate.swift           # NSStatusItem, popover, right-click menu, prefs window
+│   ├── AppDelegate.swift           # NSStatusItem, popover (+ NSPopoverDelegate), menu, prefs window,
+│   │                               # background refresh timer, wake observer
 │   ├── Shell.swift                 # zsh -ilc wrapper (run + stream)
 │   ├── UpdateManager.swift         # @MainActor state, refresh/queue, stats, persistence
 │   ├── StatsStore.swift            # upgrade history in UserDefaults
@@ -54,10 +77,11 @@ Sources/Current/
 │   ├── NpmSource.swift
 │   └── PnpmSource.swift
 └── Views/
-    ├── RootView.swift              # popover layout
+    ├── RootView.swift              # popover layout + OverlayScrollerStyle helper
     ├── Header.swift                # title + count + last-checked + refresh + prefs gear
-    ├── Footer.swift                # stats (left) + Update All (right)
+    ├── Footer.swift                # stats (left) + Update All (right, hides when no pending)
     ├── UpdateRow.swift             # per-package row (Ignore / Skip / Update)
+    ├── Hover.swift                 # hoverHighlight() modifier + ChipButtonStyle
     └── PreferencesView.swift       # tabbed prefs window
 ```
 
@@ -65,12 +89,11 @@ Sources/Current/
 
 Small stuff to fix, not full features. Roughly in priority:
 
-- [ ] **Completed rows vanish instantly.** After an upgrade succeeds
-      the row removes itself ~1.2s later, which jumps the list and
-      yanks the log away if the user was reading it. Keep the row in
-      place as a "done" state (green check + `from → to` version). Log
-      stays visible and dismissible. Clear happens only on next refresh
-      or via an explicit "Clear completed" control.
+- [x] **Completed rows stay in place** as a green-check "done" state
+      and only clear on next refresh. No more 1.2s jump that yanked
+      the log away mid-read. An explicit "Clear completed" control is
+      still deferred.
+
 - [ ] **Installs aren't cancelable.** Three levels:
   1. **Queued** items: clicking the row (or a small ×) pulls them out
      of the queue. Visual hint: queue icon becomes an × on hover.
@@ -85,15 +108,10 @@ Small stuff to fix, not full features. Roughly in priority:
       the "You're all caught up" card with the stats line moved into
       it. Probably shrink popover height too so the menu doesn't feel
       empty.
-- [ ] **Refresh causes a few-pixel vertical shift.** Pressing Refresh
-      swaps the `arrow.clockwise` button for a `ProgressView` whose
-      intrinsic height differs slightly, pushing the header down. Fix
-      by pinning a fixed frame on that slot, or wrap in a container
-      with reserved height.
-- [ ] **Don't swap the menu bar icon during refresh.** Currently it
-      flips between `shippingbox` and `arrow.triangle.2.circlepath`
-      which is distracting. Keep the box. If we want a refresh signal,
-      use a subtle badge/opacity change instead.
+- [x] **Refresh no longer shifts the header.** The button / spinner
+      swap now lives in a fixed-size `ZStack`.
+- [x] **Menu bar icon stays as `shippingbox`** and dips to
+      `alphaValue 0.55` while refreshing instead of flipping symbols.
 
 ## Deferred — in rough priority order
 
@@ -194,8 +212,9 @@ Per-row logs are done. Missing:
 ### 8. Design polish
 
 - [ ] Custom app icon + monochrome template menu bar icon.
-- [ ] Hover affordances on rows + focus ring.
-- [ ] Theming: default, compact, dense. The 340×480 popover is fine but
+- [ ] Focus rings on buttons for keyboard navigation (hover affordances
+      are done).
+- [ ] Theming: default, compact, dense. The 400×420 popover is fine but
       could be resizable.
 
 ### 9. Packaging & distribution
@@ -220,8 +239,15 @@ Per-row logs are done. Missing:
 - **Brew `--greedy` off by default** — casks with Sparkle updaters
   don't spam the list.
 - **No context menu on rows** — actions live inline next to Update.
-- **Ignore icon always visible (subtle)** — tried hover-reveal, caused
-  layout shift; reverted to always-visible borderless `bell.slash`.
-- **Per-row Update is `.bordered`, not `.borderedProminent`** —
-  too much blue across many rows; only `Update All` in the footer is
-  prominent.
+- **Ignore icon reveals on row hover** — the earlier always-visible
+  version was the fallback after a broken hover-reveal attempt caused
+  layout shift. The current version reserves the 18pt frame always and
+  only toggles `opacity`, so the Skip/Update cluster doesn't slide.
+- **Per-row Update uses `ChipButtonStyle`, not `.borderedProminent`**
+  — too much blue across many rows. Skip/Update share the chip style
+  with `prominent: true` bumping Update's resting fill so it still
+  reads as the primary row action. Only `Update All` in the footer is
+  full prominent blue.
+- **Completed rows linger until popover close** — they used to
+  auto-delete after 1.2s, which yanked the log away mid-read. Now
+  they sit as green ✓ rows and get swept by `popoverDidClose`.

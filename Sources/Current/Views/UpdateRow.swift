@@ -9,15 +9,33 @@ struct UpdateRow: View {
     private var status: RowStatus { manager.status[item.id] ?? .idle }
     private var hasLog: Bool { (manager.logs[item.id]?.isEmpty == false) }
 
+    /// Split a scoped npm name (`@scope/name`) into its parts so we can render
+    /// the scope as a muted prefix line above the bold bare name. Non-scoped
+    /// names return `(nil, item.name)` and render as a single line.
+    private var nameParts: (scope: String?, bare: String) {
+        let n = item.name
+        if n.hasPrefix("@"), let slash = n.firstIndex(of: "/") {
+            return (String(n[...slash]), String(n[n.index(after: slash)...]))
+        }
+        return (nil, n)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
                 SourceBadge(sourceId: item.sourceId)
 
                 VStack(alignment: .leading, spacing: 1) {
+                    if let scope = nameParts.scope {
+                        Text(scope)
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
                     HStack(spacing: 6) {
-                        Text(item.name)
-                            .font(.system(.body, design: .monospaced))
+                        Text(nameParts.bare)
+                            .font(.system(.body, design: .monospaced).weight(.medium))
                             .lineLimit(1)
                             .truncationMode(.middle)
                         if hasLog {
@@ -30,6 +48,7 @@ struct UpdateRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                .help(item.name)
 
                 Spacer()
 
@@ -64,14 +83,18 @@ struct UpdateRow: View {
         switch status {
         case .idle:
             HStack(spacing: 6) {
-                // Ignore — subtle always-visible icon
+                // Ignore — reveals on row hover. Frame is reserved always so
+                // the Skip/Update cluster doesn't slide when the bell fades in.
                 Button { manager.ignore(item) } label: {
                     Image(systemName: "bell.slash")
                         .font(.system(size: 11))
                         .frame(width: 18, height: rowControlHeight)
+                        .opacity(hovering ? 1 : 0)
+                        .animation(.easeOut(duration: 0.12), value: hovering)
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(.tertiary)
+                .hoverHighlight(expand: 2)
                 .help("Stop showing updates for \(item.name)")
 
                 // Skip — subtle outlined secondary action
@@ -80,9 +103,7 @@ struct UpdateRow: View {
                         .font(.caption)
                         .frame(width: 36)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(.secondary)
+                .buttonStyle(ChipButtonStyle())
                 .frame(height: rowControlHeight)
                 .fixedSize()
                 .help("Skip \(item.latestVersion) (re-appears when a newer version ships)")
@@ -93,8 +114,7 @@ struct UpdateRow: View {
                         .font(.caption.weight(.semibold))
                         .frame(width: 48)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(ChipButtonStyle(prominent: true))
                 .frame(height: rowControlHeight)
                 .fixedSize()
             }
@@ -106,12 +126,9 @@ struct UpdateRow: View {
                 .frame(height: rowControlHeight)
 
         case .running:
-            HStack(spacing: 6) {
-                LogToggleButton(expanded: $expanded, height: rowControlHeight)
-                ProgressView()
-                    .controlSize(.small)
-                    .frame(width: 16, height: rowControlHeight)
-            }
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: 16, height: rowControlHeight)
 
         case .success:
             Image(systemName: "checkmark.circle.fill")
@@ -120,29 +137,11 @@ struct UpdateRow: View {
                 .frame(height: rowControlHeight)
 
         case .failure:
-            HStack(spacing: 6) {
-                LogToggleButton(expanded: $expanded, height: rowControlHeight)
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                    .help("Failed")
-                    .frame(height: rowControlHeight)
-            }
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .help("Failed")
+                .frame(height: rowControlHeight)
         }
-    }
-}
-
-// MARK: - Pieces
-
-private struct LogToggleButton: View {
-    @Binding var expanded: Bool
-    let height: CGFloat
-    var body: some View {
-        Button { expanded.toggle() } label: {
-            Text(expanded ? "Hide" : "Log").font(.caption.weight(.medium))
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .frame(height: height)
     }
 }
 

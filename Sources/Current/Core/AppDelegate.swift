@@ -2,12 +2,18 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let manager = UpdateManager()
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var prefsWindow: NSWindow?
     private var observer: NSObjectProtocol?
+    private var backgroundTimer: Timer?
+
+    /// How often the background ticker checks staleness. The actual refresh
+    /// cadence is controlled by `UpdateManager.refreshIntervalHours`; this just
+    /// decides how fine-grained the wake-up is.
+    private let backgroundTickInterval: TimeInterval = 60
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
@@ -15,6 +21,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Refresh on launch.
         Task { await manager.refreshIfStale() }
+
+        // Periodic background refresh. Without this, the app only re-checks
+        // when the popover is opened, so a left-alone menu bar would happily
+        // sit on "23 hours ago" forever. No entitlement required — we're
+        // unsandboxed and LSUIElement means the process stays alive.
+        scheduleBackgroundRefresh()
+
+        // Re-check after the machine wakes from sleep. Timers pause during
+        // sleep, so without this the first post-wake tick could be up to
+        // `backgroundTickInterval` late.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(systemDidWake(_:)),
+            name: NSWorkspace.didWakeNotification, object: nil
+        )
 
         // Re-render the menu bar label when counts or status change.
         observer = NotificationCenter.default.addObserver(
@@ -34,6 +54,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func scheduleBackgroundRefresh() {
+        let timer = Timer(timeInterval: backgroundTickInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.manager.refreshIfStale() }
+        }
+        // `.common` so menu tracking / popover interaction doesn't pause it.
+        RunLoop.main.add(timer, forMode: .common)
+        backgroundTimer = timer
+    }
+
+    @objc private func systemDidWake(_ note: Notification) {
+        Task { @MainActor in await manager.refreshIfStale() }
+    }
+
+    // MARK: - NSPopoverDelegate
+
+    nonisolated func popoverDidClose(_ notification: Notification) {
+        Task { @MainActor in self.manager.clearCompleted() }
+    }
+
     // MARK: - Status item
 
     private func setupStatusItem() {
@@ -47,9 +86,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateStatusButton() {
         guard let button = statusItem.button else { return }
-        let name = manager.isWorking ? "arrow.triangle.2.circlepath" : "shippingbox"
-        button.image = NSImage(systemSymbolName: name, accessibilityDescription: "Current")
+        // Keep a stable icon. Signal "working" via a subtle alpha dip instead of
+        // swapping symbols, which made the bar twitch on every refresh.
+        button.image = NSImage(systemSymbolName: "shippingbox", accessibilityDescription: "Current")
         button.image?.isTemplate = true
+        button.alphaValue = manager.isWorking ? 0.55 : 1.0
         button.title = manager.visibleCount > 0 ? " \(manager.visibleCount)" : ""
     }
 
@@ -68,7 +109,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover = NSPopover()
         popover.behavior = .transient
         popover.animates = true
-        popover.contentSize = NSSize(width: 340, height: 480)
+        popover.delegate = self
+        popover.contentSize = NSSize(width: 400, height: 420)
         let root = RootView()
             .environmentObject(manager)
             .onAppear { [weak self] in

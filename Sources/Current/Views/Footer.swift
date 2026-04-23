@@ -20,31 +20,39 @@ struct Footer: View {
                 }
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .help("Updates applied through Current")
             }
 
             Spacer()
 
-            Button {
-                Task { await manager.upgradeAll() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.down.circle.fill")
-                    Text(label).fontWeight(.semibold)
+            // Hide the button entirely when there's nothing left to do.
+            // Disabling it would keep a ghost "Update All" sitting in the
+            // footer after everything turned green, which invites the user
+            // to click it and re-run already-done upgrades.
+            if !manager.pendingItems.isEmpty || manager.isBatchRunning {
+                Button {
+                    Task { await manager.upgradeAll() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.down.circle.fill")
+                        Text(label).fontWeight(.semibold)
+                    }
+                    .padding(.horizontal, 4)
                 }
-                .padding(.horizontal, 4)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .keyboardShortcut(.defaultAction)
+                .disabled(manager.pendingItems.isEmpty || manager.isBatchRunning)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
-            .keyboardShortcut(.defaultAction)
-            .disabled(manager.visibleItems.isEmpty || manager.isBatchRunning)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
     }
 
     private var label: String {
-        let n = manager.visibleItems.count
+        let n = manager.pendingItems.count
         if manager.isBatchRunning { return "Updating…" }
         return n > 0 ? "Update All (\(n))" : "Update All"
     }
