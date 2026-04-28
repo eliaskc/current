@@ -47,6 +47,11 @@ final class UpdateManager: ObservableObject {
     }
     var visibleCount: Int { visibleItems.count }
 
+    /// Count shown in the menu bar badge. Completed rows can remain visible in
+    /// the open popover as confirmation, but they should not keep advertising
+    /// outstanding work in the menu bar.
+    var pendingCount: Int { pendingItems.count }
+
     /// Visible items that still need to be upgraded — excludes anything in
     /// `.success`. Drives the "Update All" button's count and disabled state
     /// so we don't pretend there's work left when everything's green.
@@ -174,6 +179,7 @@ final class UpdateManager: ObservableObject {
         }
 
         for t in targets { status[t.id] = .queued }
+        notifyMenuBar()
 
         for t in targets {
             // Allow in-flight cancellation: if user cleared a row, skip.
@@ -209,6 +215,7 @@ final class UpdateManager: ObservableObject {
         } catch {
             status[id] = .failure(error.localizedDescription)
             recordUpgrade(item, success: false)
+            notifyMenuBar()
         }
     }
 

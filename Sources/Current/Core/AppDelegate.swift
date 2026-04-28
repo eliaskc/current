@@ -8,7 +8,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var popover: NSPopover!
     private var prefsWindow: NSWindow?
     private var observer: NSObjectProtocol?
+    private var popoverCloseObserver: NSObjectProtocol?
     private var backgroundTimer: Timer?
+    private var statusSpinner: StatusSpinnerView?
+    private var statusIconView: NSImageView?
+    private var statusBadgeView: StatusBadgeView?
 
     /// How often the background ticker checks staleness. The actual refresh
     /// cadence is controlled by `UpdateManager.refreshIntervalHours`; this just
@@ -81,17 +85,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         button.target = self
         button.action = #selector(handleStatusClick(_:))
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        installStatusSpinner(in: button)
         updateStatusButton()
     }
 
     private func updateStatusButton() {
         guard let button = statusItem.button else { return }
-        // Keep a stable icon. Signal "working" via a subtle alpha dip instead of
-        // swapping symbols, which made the bar twitch on every refresh.
-        button.image = NSImage(systemSymbolName: "shippingbox", accessibilityDescription: "Current")
-        button.image?.isTemplate = true
-        button.alphaValue = manager.isWorking ? 0.55 : 1.0
-        button.title = manager.visibleCount > 0 ? " \(manager.visibleCount)" : ""
+
+        let count = manager.pendingCount
+        statusBadgeView?.count = count
+
+        if manager.isWorking {
+            statusIconView?.isHidden = true
+            statusSpinner?.isHidden = false
+            statusSpinner?.startAnimation(nil)
+        } else {
+            statusSpinner?.stopAnimation(nil)
+            statusSpinner?.isHidden = true
+            statusIconView?.isHidden = false
+        }
+        button.image = nil
+        button.title = ""
+        button.alphaValue = 1.0
+    }
+
+    private func installStatusSpinner(in button: NSStatusBarButton) {
+        let icon = NSImageView()
+        icon.image = NSImage(systemSymbolName: "shippingbox", accessibilityDescription: "Current")
+        icon.image?.isTemplate = true
+        icon.symbolConfiguration = .init(pointSize: 15, weight: .regular)
+        icon.translatesAutoresizingMaskIntoConstraints = false
+
+        let spinner = StatusSpinnerView()
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.isHidden = true
+
+        let badge = StatusBadgeView()
+        badge.translatesAutoresizingMaskIntoConstraints = false
+
+        button.addSubview(icon)
+        button.addSubview(spinner)
+        button.addSubview(badge)
+        NSLayoutConstraint.activate([
+            icon.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            icon.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 16),
+            icon.heightAnchor.constraint(equalToConstant: 16),
+
+            spinner.centerXAnchor.constraint(equalTo: icon.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: icon.centerYAnchor),
+            spinner.widthAnchor.constraint(equalToConstant: 16),
+            spinner.heightAnchor.constraint(equalToConstant: 16),
+
+            badge.leadingAnchor.constraint(equalTo: icon.centerXAnchor, constant: 3),
+            badge.topAnchor.constraint(equalTo: icon.topAnchor, constant: -5),
+            badge.widthAnchor.constraint(equalToConstant: 16),
+            badge.heightAnchor.constraint(equalToConstant: 12)
+        ])
+
+        // Match a normal square menu-bar extra. The count is drawn as an
+        // overlay badge, clipped inside this width, so appearing/disappearing
+        // updates do not push other menu items.
+        statusItem.length = NSStatusItem.squareLength
+        statusIconView = icon
+        statusSpinner = spinner
+        statusBadgeView = badge
     }
 
     @objc private func handleStatusClick(_ sender: NSStatusBarButton) {
@@ -110,6 +168,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.behavior = .transient
         popover.animates = true
         popover.delegate = self
+        popoverCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSPopover.didCloseNotification, object: popover, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.manager.clearCompleted() }
+        }
         popover.contentSize = NSSize(width: 400, height: 420)
         let root = RootView()
             .environmentObject(manager)
@@ -195,6 +258,116 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         prefsWindow = window
+    }
+}
+
+private final class StatusBadgeView: NSView {
+    var count: Int = 0 {
+        didSet {
+            isHidden = count <= 0
+            needsDisplay = true
+        }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        isHidden = true
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        isHidden = true
+    }
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard count > 0 else { return }
+
+        let text = count > 99 ? "99+" : "\(count)"
+        let rect = bounds.insetBy(dx: 0.5, dy: 0.5)
+        let path = NSBezierPath(roundedRect: rect, xRadius: rect.height / 2, yRadius: rect.height / 2)
+        NSColor.systemRed.setFill()
+        path.fill()
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: text.count > 2 ? 6.5 : 7.5, weight: .bold),
+            .foregroundColor: NSColor.white,
+            .paragraphStyle: paragraph
+        ]
+        let size = text.size(withAttributes: attrs)
+        let textRect = NSRect(
+            x: rect.midX - size.width / 2,
+            y: rect.midY - size.height / 2 - 0.5,
+            width: size.width,
+            height: size.height
+        )
+        text.draw(in: textRect, withAttributes: attrs)
+    }
+}
+
+private final class StatusSpinnerView: NSView {
+    private var timer: Timer?
+    private var frameIndex = 0
+
+    var isAnimating: Bool { timer != nil }
+
+    func startAnimation(_ sender: Any?) {
+        guard timer == nil else { return }
+        isHidden = false
+        let timer = Timer(timeInterval: 1.0 / 12.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.frameIndex = (self.frameIndex + 1) % 12
+            self.needsDisplay = true
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    func stopAnimation(_ sender: Any?) {
+        timer?.invalidate()
+        timer = nil
+        frameIndex = 0
+        needsDisplay = true
+    }
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+
+        let tickCount = 12
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        let outerRadius = min(bounds.width, bounds.height) * 0.45
+        let innerRadius = outerRadius * 0.48
+        let lineWidth = max(1.5, outerRadius * 0.17)
+
+        context.setLineCap(.round)
+        context.setLineWidth(lineWidth)
+
+        let baseColor = NSColor.labelColor.withSystemEffect(.pressed)
+        for i in 0..<tickCount {
+            let age = (i - frameIndex + tickCount) % tickCount
+            let alpha = 0.18 + (1.0 - CGFloat(age) / CGFloat(tickCount - 1)) * 0.72
+            context.setStrokeColor(baseColor.withAlphaComponent(alpha).cgColor)
+
+            let angle = (CGFloat(i) / CGFloat(tickCount)) * .pi * 2 - .pi / 2
+            let start = CGPoint(
+                x: center.x + cos(angle) * innerRadius,
+                y: center.y + sin(angle) * innerRadius
+            )
+            let end = CGPoint(
+                x: center.x + cos(angle) * outerRadius,
+                y: center.y + sin(angle) * outerRadius
+            )
+            context.move(to: start)
+            context.addLine(to: end)
+            context.strokePath()
+        }
     }
 }
 
