@@ -137,15 +137,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             spinner.widthAnchor.constraint(equalToConstant: 16),
             spinner.heightAnchor.constraint(equalToConstant: 16),
 
-            badge.leadingAnchor.constraint(equalTo: icon.centerXAnchor, constant: 3),
-            badge.topAnchor.constraint(equalTo: icon.topAnchor, constant: -5),
-            badge.widthAnchor.constraint(equalToConstant: 16),
-            badge.heightAnchor.constraint(equalToConstant: 12)
+            badge.leadingAnchor.constraint(equalTo: icon.centerXAnchor, constant: 5),
+            badge.topAnchor.constraint(equalTo: icon.topAnchor, constant: -2),
+            badge.widthAnchor.constraint(equalToConstant: 6),
+            badge.heightAnchor.constraint(equalToConstant: 6)
         ])
 
-        // Match a normal square menu-bar extra. The count is drawn as an
-        // overlay badge, clipped inside this width, so appearing/disappearing
-        // updates do not push other menu items.
+        // Match a normal square menu-bar extra. Update availability is shown
+        // as a tiny monochrome status dot instead of a numeric badge, which is
+        // closer to Apple's menu-bar-extra guidance.
         statusItem.length = NSStatusItem.squareLength
         statusIconView = icon
         statusSpinner = spinner
@@ -285,27 +285,10 @@ private final class StatusBadgeView: NSView {
         super.draw(dirtyRect)
         guard count > 0 else { return }
 
-        let text = count > 99 ? "99+" : "\(count)"
         let rect = bounds.insetBy(dx: 0.5, dy: 0.5)
-        let path = NSBezierPath(roundedRect: rect, xRadius: rect.height / 2, yRadius: rect.height / 2)
-        NSColor.systemRed.setFill()
+        let path = NSBezierPath(ovalIn: rect)
+        NSColor.labelColor.withAlphaComponent(0.85).setFill()
         path.fill()
-
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .center
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: text.count > 2 ? 6.5 : 7.5, weight: .bold),
-            .foregroundColor: NSColor.white,
-            .paragraphStyle: paragraph
-        ]
-        let size = text.size(withAttributes: attrs)
-        let textRect = NSRect(
-            x: rect.midX - size.width / 2,
-            y: rect.midY - size.height / 2 - 0.5,
-            width: size.width,
-            height: size.height
-        )
-        text.draw(in: textRect, withAttributes: attrs)
     }
 }
 
